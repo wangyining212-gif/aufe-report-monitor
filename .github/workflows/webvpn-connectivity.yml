@@ -1,0 +1,46 @@
+name: WebVPN connectivity check
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public entry points without credentials
+        shell: bash
+        run: |
+          failed=0
+          probe() {
+            local label="$1" domain="$2" url="$3" headers status location
+            headers=$(mktemp)
+            if status=$(curl --disable --silent --show-error --connect-timeout 8 \
+                --max-time 15 --dump-header "$headers" --output /dev/null \
+                --write-out '%{http_code}' "$url"); then
+              location=$(awk 'tolower($1) == "location:" {
+                target = $2
+                if (sub(/^https?:\/\//, "", target)) {
+                  split(target, parts, /[\/:?#[:space:]]/)
+                  print parts[1]
+                }
+              }' "$headers")
+              printf '%s (%s): HTTP %s, redirect host %s\n' "$label" "$domain" "$status" "${location:--}"
+              case "$status" in
+                2*|3*) ;;
+                *) failed=1 ;;
+              esac
+            else
+              failed=1
+              printf '%s (%s): connection failed\n' "$label" "$domain"
+            fi
+            rm -f "$headers"
+          }
+
+          probe WebVPN vpn.aufe.edu.cn https://vpn.aufe.edu.cn/
+          probe WebVPN-alternate vpn2.aufe.edu.cn https://vpn2.aufe.edu.cn/
+          probe Graduate-system 211-86-241-246.vpn2.aufe.edu.cn \
+            http://211-86-241-246.vpn2.aufe.edu.cn:8118/pyxx/Default.aspx
+          exit "$failed"
